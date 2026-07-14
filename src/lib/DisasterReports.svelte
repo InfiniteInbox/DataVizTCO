@@ -7,6 +7,8 @@
     let mapContainer;
     let map;
     let mapLoaded = $state(false);
+    let showLine1 = $state(false);
+    let showLine2 = $state(false);
 
     /** counts per source_database, sorted desc */
     let orgCounts = $state([]);
@@ -239,6 +241,9 @@
             }
 
             mapLoaded = true;
+            // Let the reports land first, then make the argument about them.
+            setTimeout(() => showLine1 = true, 1400);
+            setTimeout(() => showLine2 = true, 3800);
         });
 
         return () => map?.remove();
@@ -270,6 +275,21 @@
             </div>
         </div>
     {/if}
+
+    <div class="narrative">
+        {#if showLine1}
+            <p class="line1" transition:fade={{ duration: 900 }}>
+                The reports clump to cities and to the places we already watch closely.
+            </p>
+        {/if}
+        {#if showLine2}
+            <p class="line2" transition:fade={{ duration: 900 }}>
+                That is a <strong>cycle of disinvestment</strong>: where there are no sensors,
+                floods go unreported. Unreported floods are never studied. And regions with no
+                studied floods are never judged to need monitoring — so the sensors never arrive.
+            </p>
+        {/if}
+    </div>
 
     <div class="panel">
         <h3>Who reports a disaster?</h3>
@@ -340,6 +360,29 @@
         text-transform: uppercase; letter-spacing: 0.04em;
         color: #94a3b8; font-size: 0.62rem;
     }
+
+    .narrative {
+        position: absolute;
+        top: 50%;
+        right: 3rem;
+        transform: translateY(-50%);
+        max-width: 330px;
+        color: white;
+        font-family: sans-serif;
+        z-index: 5;
+        display: flex;
+        flex-direction: column;
+        gap: 1.1rem;
+        pointer-events: none;
+    }
+    .narrative p {
+        margin: 0;
+        line-height: 1.45;
+        text-shadow: 0 2px 12px rgba(0,0,0,0.85);
+    }
+    .narrative .line1 { font-size: 1.45rem; font-weight: 700; }
+    .narrative .line2 { font-size: 1rem; font-weight: 500; color: #cbd5e1; }
+    .narrative .line2 strong { color: #fbbf24; font-weight: 700; }
 
     .panel {
         position: absolute; top: 1.5rem; left: 1.5rem;
