@@ -83,6 +83,66 @@
                 </a>
             {/each}
         </div>
+
+        <div class="sources" transition:fade={{ duration: 700, delay: 350 }}>
+            <h2>Sources and acknowledgments</h2>
+            <p>
+                Much of this project was made possible through the Ontario Flood
+                History Project, of which Dylan Van Bramer is the lead while
+                Ayusha Thapa, Hugo Fuhrer and Yash Jain are research assistants.
+            </p>
+            <p>And of course, Professor Robert Soden and Fanny Chevalier.</p>
+
+            <ul class="source-list">
+                <li id="r1">
+                    Saaty, T. L. (1977). A scaling method for priorities in hierarchical
+                    structures. <i>Journal of Mathematical Psychology</i>, 15(3), 234–281.
+                </li>
+                <li id="r2">
+                    Feloni, E. G., Karpouzos, D. K., &amp; Baltas, E. A. (2018). Optimal
+                    hydrometeorological station network design using GIS techniques and
+                    multicriteria decision analysis. <i>Journal of Hazardous, Toxic, and
+                    Radioactive Waste</i>, 22(3), 04018007.
+                </li>
+                <li id="r3">
+                    Yeh, H.-C., Chen, Y.-C., Chang, C.-H., Ho, C.-H., &amp; Wei, C. (2017).
+                    Rainfall network optimization using radar and entropy. <i>Entropy</i>,
+                    19(10), 553.
+                </li>
+                <li id="r4">
+                    Li, C., Singh, V. P., &amp; Mishra, A. K. (2012). Entropy theory-based
+                    criterion for hydrometric network evaluation and design: Maximum
+                    information minimum redundancy. <i>Water Resources Research</i>, 48(5),
+                    W05521.
+                </li>
+                <li id="r5">
+                    Mahfouf, J.-F., Brasnett, B., &amp; Gagnon, S. (2007). A Canadian
+                    Precipitation Analysis (CaPA) project: Description and preliminary
+                    results. <i>Atmosphere-Ocean</i>, 45(1), 1–17.
+                </li>
+                <li id="r6">
+                    Lespinas, F., Fortin, V., Roy, G., Rasmussen, P., &amp; Stadnyk, T.
+                    (2015). Performance evaluation of the Canadian Precipitation Analysis
+                    (CaPA). <i>Journal of Hydrometeorology</i>, 16(5), 2045–2064.
+                </li>
+                <li id="r7">
+                    Fortin, V., Roy, G., Stadnyk, T., Koenig, K., Gasset, N., &amp; Mahidjiba,
+                    A. (2018). Ten years of science based on the Canadian Precipitation
+                    Analysis: A CaPA system overview and literature review.
+                    <i>Atmosphere-Ocean</i>, 56(3), 178–196.
+                </li>
+                <li>Ontario Watershed Boundaries — Ontario Ministry of Natural Resources
+                    (Land Information Ontario / Ontario GeoHub).</li>
+                <li>Streamflow — HYDAT, Water Survey of Canada, Environment and Climate
+                    Change Canada.</li>
+                <li>Surface climate stations — Environment and Climate Change Canada.</li>
+                <li>Precipitation confidence (RDPA / CaPA CIFA) — Meteorological Service
+                    of Canada, ECCC.</li>
+                <li>NRCAN Natural Resources Canada</li>
+                <li>CDD Canadian Disaster Database</li>
+                <li>Conservation Ontario</li>
+            </ul>
+        </div>
     </div>
 </div>
 
@@ -200,5 +260,40 @@
         font-size: 0.76rem;
         font-weight: 600;
         color: #8ab4ff;
+    }
+
+    .sources {
+        max-width: 860px;
+        margin: 3.5rem auto 0;
+        padding: 1.5rem 1.5rem 1.25rem;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(138, 180, 255, 0.2);
+    }
+
+    .sources h2 {
+        margin: 0 0 0.9rem;
+        font-size: 1.1rem;
+        color: #f8fafc;
+    }
+
+    .sources p {
+        margin: 0 0 0.75rem;
+        line-height: 1.6;
+        font-size: 0.95rem;
+        color: #cbd5e1;
+    }
+
+    .source-list {
+        margin: 1rem 0 0;
+        padding-left: 1.25rem;
+        display: grid;
+        gap: 0.75rem;
+        color: #cbd5e1;
+    }
+
+    .source-list li {
+        line-height: 1.55;
+        font-size: 0.88rem;
     }
 </style>
