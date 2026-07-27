@@ -190,7 +190,7 @@
             if (hasCoarse) {
                 map.addSource('wscore-coarse', {
                     type: 'vector',
-                    url: `https://pub-28597005e3d942a78c03d372ff7cdadc.r2.dev/ontario_wscore_coarse.pmtiles`,
+                    url: `pmtiles://https://pub-28597005e3d942a78c03d372ff7cdadc.r2.dev/ontario_wscore_coarse.pmtiles`,
                     promoteId: 'cell_id'
                 });
                 // minzoom 0, not 4: the zoom that fits all of Ontario can fall below
@@ -200,7 +200,7 @@
 
             map.addSource('wscore', {
                 type: 'vector',
-                url: `https://pub-28597005e3d942a78c03d372ff7cdadc.r2.dev/ontario_wscore.pmtiles`,
+                url: `pmtiles://https://pub-28597005e3d942a78c03d372ff7cdadc.r2.dev/ontario_wscore.pmtiles`,
                 promoteId: 'cell_id'
             });
             // Fine grid only takes over above the coarse handoff (or everywhere
