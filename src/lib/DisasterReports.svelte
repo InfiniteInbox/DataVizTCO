@@ -1,5 +1,6 @@
 <script>
     import { onMount } from 'svelte';
+    import { base } from '$app/paths';
     import { fade } from 'svelte/transition';
     import maplibregl from 'maplibre-gl';
     import 'maplibre-gl/dist/maplibre-gl.css';
@@ -208,7 +209,7 @@
 
         map.on('load', async () => {
             map.setMinZoom(map.getZoom());   // full-province view is the zoom-out floor
-            const data = await fetch('/data/disaster_reports.geojson').then(r => r.json());
+            const data = await fetch(`${base}/data/disaster_reports.geojson`).then(r => r.json());
 
             // Stable identity per feature, independent of array order (the
             // z-order sort below reorders the array but not these), so

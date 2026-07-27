@@ -1,5 +1,6 @@
 <script>
     import { onMount } from 'svelte';
+    import { base } from '$app/paths';
     import { fade } from 'svelte/transition';
     import maplibregl from 'maplibre-gl';
     import 'maplibre-gl/dist/maplibre-gl.css';
@@ -93,8 +94,8 @@
         });
 
         map.on('load', async () => {
-            const stations = await fetch('/data/stations.geojson').then(r => r.json());
-            const radar = await fetch('/data/radar_coverage.geojson').then(r => r.json());
+            const stations = await fetch(`${base}/data/stations.geojson`).then(r => r.json());
+            const radar = await fetch(`${base}/data/radar_coverage.geojson`).then(r => r.json());
 
             // Whatever zoom it took to fit the province becomes the floor, so the
             // user can zoom in but never back out past the full-Ontario view.

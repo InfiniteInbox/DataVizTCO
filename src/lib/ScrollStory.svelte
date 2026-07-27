@@ -1,5 +1,6 @@
 <script>
     import { onMount } from 'svelte';
+    import { base } from '$app/paths';
     import { fade } from 'svelte/transition';
     import scrollama from 'scrollama';
     import * as d3 from 'd3';
@@ -165,10 +166,10 @@
     let introTyped = $state({ text: '' });
 
     let benefits = $state([
-        { full: 'improve early warning systems for storms', typed: { text: '' }, caption: 'Rain cells on urban radar; the Northern Mesonet Project', media: '/radar-cells.gif', link: 'https://www.uwo.ca/nmp/index.html' },
-        { full: 'inform smarter city planning', typed: { text: '' }, caption: 'Cities adapting rural flood-mitigation techniques', media: '/city-planning.jpg', link: 'https://www.sciencedirect.com/science/article/pii/S221458182500285X' },
-        { full: 'learn more about the micro-scale changes of climate change', typed: { text: '' }, caption: 'The Canadian Severe Storms Lab, where the Northern Hail and Tornado Project are in', media: '/hail-project.jpg', link: 'https://www.uwo.ca/cssl/index.html' },
-        { full: 'advance weather forecasting knowledge and techniques', typed: { text: '' }, caption: 'AI forecasting: GraphCast, NVIDIA Earth-2, GenCast, FourCastNet', media: '/ai-forecasting.jpg', link: 'https://wmo.int/media/magazine-article/forecasting-future-role-of-artificial-intelligence-transforming-weather-prediction-and-policy' }
+        { full: 'improve early warning systems for storms', typed: { text: '' }, caption: 'Rain cells on urban radar; the Northern Mesonet Project', media: `${base}/radar-cells.gif`, link: 'https://www.uwo.ca/nmp/index.html' },
+        { full: 'inform smarter city planning', typed: { text: '' }, caption: 'Cities adapting rural flood-mitigation techniques', media: `${base}/city-planning.jpg`, link: 'https://www.sciencedirect.com/science/article/pii/S221458182500285X' },
+        { full: 'learn more about the micro-scale changes of climate change', typed: { text: '' }, caption: 'The Canadian Severe Storms Lab, where the Northern Hail and Tornado Project are in', media: `${base}/hail-project.jpg`, link: 'https://www.uwo.ca/cssl/index.html' },
+        { full: 'advance weather forecasting knowledge and techniques', typed: { text: '' }, caption: 'AI forecasting: GraphCast, NVIDIA Earth-2, GenCast, FourCastNet', media: `${base}/ai-forecasting.jpg`, link: 'https://wmo.int/media/magazine-article/forecasting-future-role-of-artificial-intelligence-transforming-weather-prediction-and-policy' }
     ]);
 
     let typeTimers = [];
@@ -369,7 +370,7 @@
 
     onMount(() => {
         async function loadCanada() {
-            const geo = await fetch('/canada.geojson').then(r => r.json());
+            const geo = await fetch(`${base}/canada.geojson`).then(r => r.json());
 
             const projection = d3.geoConicConformal()
                 .rotate([98, 0])
@@ -388,7 +389,7 @@
         }
         loadCanada();
 
-        fetch('/data/game_rounds.json')
+        fetch(`${base}/data/game_rounds.json`)
             .then(r => r.json())
             .then(d => rounds = d)
             .catch(err => console.error('Failed to load game rounds:', err));
