@@ -40,3 +40,11 @@ npm run build
 You can preview the production build with `npm run preview`.
 
 > To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+
+## Deploying to GitHub Pages
+
+This repository is configured to deploy from GitHub Actions using `.github/workflows/deploy.yml`.
+
+- The app is built with `@sveltejs/adapter-static` into `build/`.
+- Production builds use the base path `/DataVizTCO` so assets resolve correctly under the repository site URL.
+- In GitHub repository settings, set **Pages** to **Build and deployment → Source: GitHub Actions**.
