@@ -190,8 +190,8 @@
         <div class="narrative" transition:fade={{ duration: 900 }}>
             <p>It looks like we cover Ontario pretty well.</p>
             <p class="sub">
-                Precipitation and streamflow stations are spread <strong>evenly across the province</strong> —
-                verified by a Moran's <em>I</em> spatial-bias analysis.
+                Precipitation and streamflow stations are spread <strong>evenly across the province.</strong>
+                This is verified by a Moran's <em>I</em> spatial-bias analysis.
             </p>
             <p class="sub">
                 And Ontario's radar network reaches

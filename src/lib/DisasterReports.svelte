@@ -4,11 +4,19 @@
     import maplibregl from 'maplibre-gl';
     import 'maplibre-gl/dist/maplibre-gl.css';
 
+    let { onContinue } = $props();
+
     let mapContainer;
     let map;
     let mapLoaded = $state(false);
     let showLine1 = $state(false);
     let showLine2 = $state(false);
+    let showAdvance = $state(false);
+
+    /** regionTotal[feature._idx] = total reports (points + polygons) whose
+     *  location falls within that polygon's area, including itself. Only
+     *  meaningful for Polygon/MultiPolygon features; computed once on load. */
+    let regionTotal = [];
 
     /** counts per source_database, sorted desc */
     let orgCounts = $state([]);
@@ -52,6 +60,108 @@
         };
         walk(geom.coordinates);
         return (maxX - minX) * (maxY - minY);
+    }
+
+    /** first [lon, lat] pair found in a Polygon or MultiPolygon geometry,
+     *  used as a cheap stand-in point for approximate polygon/polygon overlap */
+    function firstVertex(geom) {
+        let c = geom.coordinates;
+        while (typeof c[0][0] !== 'number') c = c[0];
+        return c[0];
+    }
+
+    /** planar bounding box, not d3's spherical geoBounds. Several polygons in
+     *  this dataset have clockwise exterior rings (a common shapefile->geojson
+     *  export quirk, backwards from the GeoJSON RFC's CCW requirement); d3-geo
+     *  reads a reversed ring as "everything except this shape", which blew its
+     *  bbox out to the whole globe and made point-in-polygon tests backwards
+     *  too. Plain 2D bounds/ray-casting don't care about winding direction at
+     *  all, so they sidestep the bad data instead of needing to fix it. */
+    function geomBounds(geom) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        const walk = (c) => {
+            if (typeof c[0] === 'number') {
+                if (c[0] < minX) minX = c[0];
+                if (c[0] > maxX) maxX = c[0];
+                if (c[1] < minY) minY = c[1];
+                if (c[1] > maxY) maxY = c[1];
+            } else for (const x of c) walk(x);
+        };
+        walk(geom.coordinates);
+        return [[minX, minY], [maxX, maxY]];
+    }
+
+    const bboxOverlap = (a, b) =>
+        a[0][0] <= b[1][0] && a[1][0] >= b[0][0] && a[0][1] <= b[1][1] && a[1][1] >= b[0][1];
+
+    const inBbox = (pt, b) =>
+        pt[0] >= b[0][0] && pt[0] <= b[1][0] && pt[1] >= b[0][1] && pt[1] <= b[1][1];
+
+    /** even-odd ray-casting test, winding-direction independent */
+    function pointInRing(pt, ring) {
+        let inside = false;
+        const [x, y] = pt;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const [xi, yi] = ring[i];
+            const [xj, yj] = ring[j];
+            const crosses = (yi > y) !== (yj > y) &&
+                x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+            if (crosses) inside = !inside;
+        }
+        return inside;
+    }
+
+    function pointInPolygon(pt, rings) {
+        if (!pointInRing(pt, rings[0])) return false;
+        for (let k = 1; k < rings.length; k++) {
+            if (pointInRing(pt, rings[k])) return false; // inside a hole
+        }
+        return true;
+    }
+
+    function pointInGeom(pt, geom) {
+        if (geom.type === 'Polygon') return pointInPolygon(pt, geom.coordinates);
+        if (geom.type === 'MultiPolygon') return geom.coordinates.some((rings) => pointInPolygon(pt, rings));
+        return false;
+    }
+
+    /**
+     * For every polygon/multipolygon feature, count how many total reports
+     * (points and other polygons) fall within its area, including itself —
+     * "how many reports does hovering this region represent". Bounding-box
+     * pre-filtering keeps this cheap despite the O(n^2) polygon/polygon pass:
+     * with 800-ish features total, only geographically overlapping pairs
+     * ever reach the point-in-polygon check.
+     *
+     * Polygon/polygon overlap is approximated by testing a representative
+     * vertex of each against the other rather than true geometric
+     * intersection (no turf dependency) — exact for nested regions, and
+     * correct for the overwhelming majority of real admin/flood-extent
+     * shapes in this dataset.
+     */
+    function computeRegionTotals(features) {
+        const totals = new Array(features.length).fill(0);
+        const points = features.filter((f) => f.geometry?.type === 'Point');
+        const polys = features
+            .filter((f) => f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon')
+            .map((f) => ({ f, bounds: geomBounds(f.geometry) }));
+
+        for (const { f: poly, bounds } of polys) {
+            let count = 0;
+            for (const pf of points) {
+                const c = pf.geometry.coordinates;
+                if (inBbox(c, bounds) && pointInGeom(c, poly.geometry)) count++;
+            }
+            for (const other of polys) {
+                if (other.f === poly) { count++; continue; }
+                if (!bboxOverlap(bounds, other.bounds)) continue;
+                if (pointInGeom(firstVertex(other.f.geometry), poly.geometry) || pointInGeom(firstVertex(poly.geometry), other.f.geometry)) {
+                    count++;
+                }
+            }
+            totals[poly.properties._idx] = count;
+        }
+        return totals;
     }
 
     /** MapLibre 'match' expression: org -> colour, grey fallback */
@@ -99,6 +209,11 @@
         map.on('load', async () => {
             map.setMinZoom(map.getZoom());   // full-province view is the zoom-out floor
             const data = await fetch('/data/disaster_reports.geojson').then(r => r.json());
+
+            // Stable identity per feature, independent of array order (the
+            // z-order sort below reorders the array but not these), so
+            // regionTotal can be looked up by feature properties at hover time.
+            data.features.forEach((f, i) => { f.properties._idx = i; });
 
             // Tally organisations and assign colours.
             const tally = new Map();
@@ -217,21 +332,35 @@
                         map.setFeatureState({ source: 'reports', id: hoveredId }, { hover: true });
                     }
 
-                    const all = reportsAt(e.point);
-                    // Newest first, and only show a handful before we summarise.
-                    const dates = [...new Set(all.map(fmtDate))]
-                        .sort((a, b) => (b.match(/\d{4}/)?.[0] ?? '').localeCompare(a.match(/\d{4}/)?.[0] ?? ''))
-                        .slice(0, 4);
+                    if (layer === 'reports-fill') {
+                        // A region's total isn't "what's under this pixel" — it's
+                        // every report anywhere inside the polygon's boundary.
+                        hovered = {
+                            x: e.point.x,
+                            y: e.point.y,
+                            org: p.source_database ?? 'Unknown',
+                            date: fmtDate(p),
+                            kind: 'area',
+                            count: regionTotal[p._idx] ?? 1,
+                            dates: []
+                        };
+                    } else {
+                        const all = reportsAt(e.point);
+                        // Newest first, and only show a handful before we summarise.
+                        const dates = [...new Set(all.map(fmtDate))]
+                            .sort((a, b) => (b.match(/\d{4}/)?.[0] ?? '').localeCompare(a.match(/\d{4}/)?.[0] ?? ''))
+                            .slice(0, 4);
 
-                    hovered = {
-                        x: e.point.x,
-                        y: e.point.y,
-                        org: p.source_database ?? 'Unknown',
-                        date: fmtDate(p),
-                        kind: layer === 'reports-fill' ? 'area' : 'point',
-                        count: all.length,
-                        dates
-                    };
+                        hovered = {
+                            x: e.point.x,
+                            y: e.point.y,
+                            org: p.source_database ?? 'Unknown',
+                            date: fmtDate(p),
+                            kind: 'point',
+                            count: all.length,
+                            dates
+                        };
+                    }
                 });
                 map.on('mouseleave', layer, () => {
                     map.getCanvas().style.cursor = '';
@@ -244,6 +373,21 @@
             // Let the reports land first, then make the argument about them.
             setTimeout(() => showLine1 = true, 1400);
             setTimeout(() => showLine2 = true, 3800);
+            setTimeout(() => showAdvance = true, 5600);
+
+            // Region totals are only needed once someone hovers a polygon, and
+            // the pass is O(n^2)-ish over ~800 features — running it here would
+            // hold "Loading reports…" up for no reason. Defer it a tick so the
+            // map, legend and stats paint first; it typically finishes in well
+            // under a second and regionTotal[...] just falls back to 1 report
+            // until it does.
+            setTimeout(() => {
+                try {
+                    regionTotal = computeRegionTotals(data.features);
+                } catch (err) {
+                    console.error('Failed to compute region totals:', err);
+                }
+            }, 0);
         });
 
         return () => map?.remove();
@@ -257,7 +401,9 @@
 
     {#if hovered}
         <div class="report-tooltip" style="left:{hovered.x}px; top:{hovered.y}px;">
-            {#if hovered.count > 1}
+            {#if hovered.kind === 'area'}
+                <strong class="tt-count">{hovered.count.toLocaleString()} report{hovered.count === 1 ? '' : 's'} in this area</strong>
+            {:else if hovered.count > 1}
                 <strong class="tt-count">{hovered.count} reports here</strong>
                 <div class="tt-dates">
                     {#each hovered.dates as d}<span>{d}</span>{/each}
@@ -327,6 +473,10 @@
             <p class="hint">Loading reports…</p>
         {/if}
     </div>
+
+    {#if showAdvance && onContinue}
+        <button class="advance-arrow" onclick={onContinue} transition:fade aria-label="Continue">&rarr;</button>
+    {/if}
 </div>
 
 <style>
@@ -439,4 +589,22 @@
     }
 
     .hint { margin: 0.8rem 0 0; font-size: 0.72rem; color: #94a3b8; line-height: 1.45; }
+
+    .advance-arrow {
+        position: absolute;
+        bottom: 2rem;
+        right: 2rem;
+        width: 3.5rem; height: 3.5rem;
+        border: none; border-radius: 50%;
+        background: rgba(138, 180, 255, 0.9);
+        color: #0a0a12;
+        font-size: 1.6rem; font-weight: bold; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        z-index: 50;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(138,180,255,0.5); }
+        50% { transform: scale(1.08); box-shadow: 0 0 0 12px rgba(138,180,255,0); }
+    }
 </style>

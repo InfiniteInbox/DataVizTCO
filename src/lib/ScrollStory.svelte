@@ -6,25 +6,22 @@
     import OntarioStations from '$lib/OntarioStations.svelte';
     import WScoreMap from '$lib/WScoreMap.svelte';
     import DisasterReports from '$lib/DisasterReports.svelte';
+    import Conclusion from '$lib/Conclusion.svelte';
 
     let canvas;
     let animationFrameId;
 
-    // Droplet radius encodes the damage cost of each event. Area is scaled
-    // roughly proportional to cost (r ∝ √cost) so the visual weight is honest,
-    // then normalised so Hazel (the costliest) reads ~26px.
-    const COST_M = { hazel: 1300, 'july-2013': 1000, 'lake-ontario': 550 }; // $ millions
+    const COST_M = { hazel: 1300, 'july-2013': 1000, 'lake-ontario': 550 };
     const RADIUS_SCALE = 26 / Math.sqrt(1300);
     const costRadius = (id) => Math.sqrt(COST_M[id]) * RADIUS_SCALE;
 
+    let hoveredEventId = $state(null);
     let eventDroplets = $state([
         { id: 'hazel', name: 'Hurricane Hazel', year: 1954, damage: '$1.3 billion in damage', x: 200, y: -100, vy: 3, a: costRadius('hazel') },
         { id: 'july-2013', name: 'July 2013 Flood', year: 2013, damage: '$1 billion in damage', x: 500, y: -300, vy: 2, a: costRadius('july-2013') },
         { id: 'lake-ontario', name: 'Lake Ontario Freshet', year: 2017, damage: '$550 million in damage', x: 800, y: -200, vy: 3, a: costRadius('lake-ontario') }
     ]);
 
-    let hoveredEventId = $state(null);
-    let hoveredEventData = $derived(eventDroplets.find(drop => drop.id === hoveredEventId));
     let introView;
     let currentStep = $state(0);
 
@@ -37,38 +34,34 @@
     let currentRound = $state(0);
     let correctCount = $state(0);
     let scene = $state(0);
+    let harmIntroDone = $state(false);
+    let gameIntroDismissed = $state(false);
 
-    // Game rounds are loaded from static/data/game_rounds.json (exported from
-    // the data-prep notebook). Each round: { name, flooded, event, blurb,
-    // dates[], precip[] (mm/day), flow[] (m3/s/day) }.
-    /** @type {Array<{ name?: string, flooded: boolean, event: string|null, blurb?: string, dates?: string[], precip: number[], flow: number[] }>} */
+    const EXAMPLE_PRECIP = [5, 12, 60, 88, 38, 8, 0, 4];
+    const EXAMPLE_FLOW = [8, 9, 11, 22, 55, 78, 52, 28];
+
+    /** @type {Array<{ name?: string, flooded: boolean, event: string|null, blurb?: string, dates?: string[], precip: number[], flow: number[], precipAvg?: number, flowAvg?: number }>} */
     let rounds = $state([]);
     let totalRounds = $derived(rounds.length);
 
-    // Current round + axis extents, used to label the game charts.
-    // Every series can contain nulls: days where the record simply doesn't exist.
-    // Those are NOT zeros, and must never be plotted as zeros — a missing gauge
-    // reading is the whole point of the "We may never know" round.
     const finite = (arr) => (arr ?? []).filter((v) => typeof v === 'number' && isFinite(v));
 
     let round = $derived(rounds[currentRound]);
-    let precipMax = $derived(round ? Math.max(...finite(round.precip), 1) : 1);
+    let precipMax = $derived(round ? Math.max(...finite(round.precip), round.precipAvg ?? 0, 1) : 1);
     let flowVals = $derived(round ? finite(round.flow) : []);
-    let flowMax = $derived(flowVals.length ? Math.max(...flowVals) : 1);
-    let flowMin = $derived(flowVals.length ? Math.min(...flowVals) : 0);
+    let flowMax = $derived(flowVals.length ? Math.max(...flowVals, round?.flowAvg ?? -Infinity) : 1);
+    let flowMin = $derived(flowVals.length ? Math.min(...flowVals, round?.flowAvg ?? Infinity) : 0);
+    let precipAvgPct = $derived(round?.precipAvg != null ? (round.precipAvg / precipMax) * 100 : null);
+    let flowAvgY = $derived(round?.flowAvg != null ? 48 - ((round.flowAvg - flowMin) / ((flowMax - flowMin) || 1)) * 44 : null);
     let roundDays = $derived(round ? round.precip.length : 0);
-    // How much of this round is actually observed?
     let missingDays = $derived(round
         ? round.precip.filter(v => v == null).length + round.flow.filter(v => v == null).length
         : 0);
 
-    // Friendly axis tick formatting.
     const fmtTick = (v) => (v >= 100 ? Math.round(v).toString()
         : v >= 10 ? v.toFixed(0)
         : v.toFixed(1));
 
-    // Precip bars, scaled so the tallest observed day fills the axis.
-    // Missing days come back flagged, so the template can draw a gap instead of a bar.
     /** @param {Array<number|null>} precip */
     function precipHeights(precip) {
         const max = Math.max(...finite(precip), 1);
@@ -77,9 +70,6 @@
         );
     }
 
-    // Build the hydrograph (0..100 x, 0..50 y viewBox). Nulls BREAK the line into
-    // separate segments rather than interpolating across them — drawing a straight
-    // line over a data gap would invent a measurement that was never taken.
     /** @param {Array<number|null>} flow */
     function flowSegments(flow) {
         const vals = finite(flow);
@@ -90,7 +80,7 @@
         const n = flow.length;
         const xy = (v, i) => ({
             x: n > 1 ? (i / (n - 1)) * 100 : 50,
-            y: 48 - ((v - min) / range) * 44  // higher flow -> higher line
+            y: 48 - ((v - min) / range) * 44
         });
 
         const paths = [];
@@ -100,7 +90,7 @@
             if (run.length >= 2) {
                 paths.push(run.map((p, k) => `${k === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' '));
             } else if (run.length === 1) {
-                points.push(run[0]);   // a lone reading between two gaps
+                points.push(run[0]);
             }
             run = [];
         };
@@ -112,13 +102,9 @@
         return { paths, points };
     }
 
-    // Canada map state
     let canadaPath = $state('');
     let mapReady = $state(false);
 
-    // Real, sourced events where missing or broken monitoring left people without
-    // warning. Each entry links to the reporting. lon/lat are projected to px/py
-    // once the Canada basemap loads.
     let monitoringFailures = $state([
         {
             id: 'flinflon', lon: -101.86, lat: 54.77, px: 0, py: 0,
@@ -173,18 +159,19 @@
     let hoveredStarId = $state(null);
     let hoveredStar = $derived(monitoringFailures.find(s => s.id === hoveredStarId));
 
-    // Benefits typewriter sequence
     let showArrow = $state(false);
     let sequenceStarted = $state(false);
     let benefitStage = $state(0);
     let introTyped = $state({ text: '' });
 
     let benefits = $state([
-        { full: 'improve early warning systems for storms', typed: { text: '' }, caption: 'Rain cells on urban radar; the Northern Mesonet Project', media: '/radar-cells.gif' },
-        { full: 'inform smarter city planning', typed: { text: '' }, caption: 'Cities adapting rural flood-mitigation techniques', media: '/city-planning.jpg' },
-        { full: 'learn more about the micro-scale changes of climate change', typed: { text: '' }, caption: 'The Canadian Severe Storms Lab, where the Northern Hail and Tornado Project are in', media: '/hail-project.jpg' },
-        { full: 'advance weather forecasting knowledge and techniques', typed: { text: '' }, caption: 'AI forecasting: GraphCast, NVIDIA Earth-2, GenCast, FourCastNet', media: '/ai-forecasting.jpg' }
+        { full: 'improve early warning systems for storms', typed: { text: '' }, caption: 'Rain cells on urban radar; the Northern Mesonet Project', media: '/radar-cells.gif', link: 'https://www.uwo.ca/nmp/index.html' },
+        { full: 'inform smarter city planning', typed: { text: '' }, caption: 'Cities adapting rural flood-mitigation techniques', media: '/city-planning.jpg', link: 'https://www.sciencedirect.com/science/article/pii/S221458182500285X' },
+        { full: 'learn more about the micro-scale changes of climate change', typed: { text: '' }, caption: 'The Canadian Severe Storms Lab, where the Northern Hail and Tornado Project are in', media: '/hail-project.jpg', link: 'https://www.uwo.ca/cssl/index.html' },
+        { full: 'advance weather forecasting knowledge and techniques', typed: { text: '' }, caption: 'AI forecasting: GraphCast, NVIDIA Earth-2, GenCast, FourCastNet', media: '/ai-forecasting.jpg', link: 'https://wmo.int/media/magazine-article/forecasting-future-role-of-artificial-intelligence-transforming-weather-prediction-and-policy' }
     ]);
+
+    let typeTimers = [];
 
     function typewrite(full, target, speed = 25) {
         let i = 0;
@@ -194,9 +181,18 @@
             i++;
             if (i >= full.length) clearInterval(id);
         }, speed);
+        typeTimers.push(id);
+        return id;
+    }
+
+    function clearTypewriters() {
+        typeTimers.forEach(clearInterval);
+        typeTimers = [];
     }
 
     function startSequence() {
+        clearTypewriters();
+        scene = 15;
         sequenceStarted = true;
         typewrite('While many of these events were rural, this is an urban issue too. Improving monitoring and data collection across Canada lets us:', introTyped, 20);
         benefitStage = 0;
@@ -210,7 +206,6 @@
         }
     }
 
-    // Falling event droplets (throttled)
     $effect(() => {
         const intervalId = setInterval(() => {
             for (let i = 0; i < eventDroplets.length; i++) {
@@ -226,21 +221,18 @@
         return () => clearInterval(intervalId);
     });
 
-    // Show the advance arrow 5s after the map appears
     $effect(() => {
-        if (gameComplete) {
+        if (gameComplete && scene === 14 && harmIntroDone) {
             const t = setTimeout(() => { showArrow = true; }, 5000);
             return () => clearTimeout(t);
         }
+        showArrow = false;
     });
 
-    // A round with flooded == null has no right answer — the record isn't there, so
-    // no guess can be correct. It still counts toward the total, which caps the best
-    // possible score at 3 of 4. That ceiling is the point.
     function submitGuess(guess) {
         userGuess = guess;
         const truth = rounds[currentRound].flooded;
-        if (truth == null) return;              // unanswerable: nobody scores this one
+        if (truth == null) return;
         if ((guess === 'Y') === truth) {
             correctCount += 1;
         }
@@ -255,39 +247,73 @@
         }
     }
 
-    // ---- Main scene controller (back / forward) ----
-    // Only active once the scroll-driven intro is over (map onward), so the
-    // scrollama flow in the rain / game / verdict phases is never overridden.
-    let showController = $derived(gameComplete || gameVerdict || scene !== 0);
-    let canGoForward = $derived(scene !== 14);
+    let droplets = [];
+    let chosenDrop = null;
 
-    function goForward() {
-        if (scene === 13) { scene = 14; return; }
-        if (scene === 12) { scene = 13; return; }
-        if (scene === 11) { scene = 12; return; }
-        if (scene !== 0) return;
-        if (sequenceStarted) {
-            if (benefitStage < benefits.length) advanceSequence();
-            else scene = 11;
-            return;
+    function resetAllDroplets() {
+        chosenDrop = null;
+        for (const drop of droplets) {
+            drop.a = 4;
+            drop.targetA = 4;
+            if (drop.vy === 0) {
+                drop.vy = Math.random() * 2 + 5;
+            }
         }
-        if (gameComplete) { startSequence(); return; }
     }
 
-    // Fully unwind the game/benefits flow back to the falling-rain intro.
-    // The chosen droplet is frozen huge once the game runs, so it must be
-    // released (velocity restored, un-chosen) or the intro renders as one
-    // giant static drop. We also scroll to the top so scrollama re-syncs its
-    // step indices instead of leaving the flow in a half-scrolled state.
-    function resetToRain() {
-        if (chosenDrop) {
-            chosenDrop.a = 4;
-            chosenDrop.vy = Math.random() * 2 + 5;
-            chosenDrop.x = Math.random() * (canvas ? canvas.width : window.innerWidth);
-            chosenDrop.y = -40;
-            chosenDrop = null;
+    function ensureChosenDrop() {
+        if (chosenDrop || !droplets.length || !canvas) return;
+        let mindist = Infinity;
+        for (const drop of droplets) {
+            const dist = Math.hypot(drop.x - (canvas.width / 2), drop.y - (canvas.height / 2));
+            if (dist < mindist) {
+                mindist = dist;
+                chosenDrop = drop;
+            }
         }
-        scene = 0;
+        if (chosenDrop) {
+            chosenDrop.vy = 0;
+            chosenDrop.x = canvas.width / 2;
+            chosenDrop.y = canvas.height / 2;
+        }
+    }
+
+    function openBiggerPicture() {
+        resetAllDroplets();
+        showArrow = false;
+        sequenceStarted = false;
+        benefitStage = 0;
+        gameComplete = true;
+        scene = 11;
+    }
+
+    let showController = $derived(gameComplete || gameVerdict || scene !== 0);
+
+    const chapters = [
+        { key: 'rain', label: 'The Cost of Flooding' },
+        { key: 'stations', label: 'The Bigger Picture' },
+        { key: 'wscore', label: 'What the Data Shows' },
+        { key: 'harm', label: 'Where Monitoring Failed' },
+        { key: 'benefits', label: 'Why It Matters' },
+        { key: 'reports', label: 'Who Reports a Disaster?' },
+        { key: 'conclusion', label: 'What You Can Do' }
+    ];
+
+    let currentChapterKey = $derived(
+        scene === 0 ? ((gameVisible || gameVerdict) ? 'game' : 'rain')
+        : scene === 11 ? 'stations'
+        : scene === 12 || scene === 13 ? 'wscore'
+        : scene === 14 ? 'harm'
+        : scene === 15 ? 'benefits'
+        : scene === 18 ? 'conclusion'
+        : 'reports'
+    );
+    let chaptersOpen = $state(false);
+    const toggleChapters = () => chaptersOpen = !chaptersOpen;
+    const closeChapters = () => chaptersOpen = false;
+
+    function resetIntroState() {
+        resetAllDroplets();
         currentStep = 0;
         gameVisible = false;
         gameStarted = false;
@@ -299,32 +325,47 @@
         showArrow = false;
         sequenceStarted = false;
         benefitStage = 0;
-        if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+        gameIntroDismissed = false;
     }
 
-    function goBack() {
-        if (scene === 14) { scene = 13; return; }
-        if (scene === 13) { scene = 12; return; }
-        if (scene === 12) { scene = 11; return; }
-        if (scene === 11) {
-            // back into the fully-revealed benefits sequence
+    function resetToRain() {
+        if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' });
+        resetIntroState();
+        scene = 0;
+    }
+
+    function scrollToGame() {
+        if (typeof window === 'undefined' || typeof document === 'undefined') return;
+        const steps = document.querySelectorAll('.step');
+        const target = steps[2];
+        if (!target) return;
+        const top = target.getBoundingClientRect().top + window.scrollY;
+        window.scrollTo({ top: top + window.innerHeight * 1.5, behavior: 'auto' });
+    }
+
+    function jumpToChapter(key) {
+        closeChapters();
+        if (key === currentChapterKey) return;
+        if (key === 'rain') { resetToRain(); return; }
+        if (key === 'game') {
+            resetIntroState();
             scene = 0;
-            gameComplete = true;
-            sequenceStarted = true;
-            benefitStage = benefits.length;
+            scrollToGame();
             return;
         }
-        if (scene !== 0) return;
-        if (sequenceStarted) {
-            if (benefitStage > 0) benefitStage -= 1;
-            else sequenceStarted = false;
-            return;
-        }
-        if (gameComplete) { gameComplete = false; gameVerdict = true; return; }
-        if (gameVerdict) { resetToRain(); return; }
-    }
 
-    let chosenDrop = null;
+        resetAllDroplets();
+        gameComplete = true;
+        gameVerdict = false;
+        showArrow = false;
+
+        if (key === 'stations') { scene = 11; return; }
+        if (key === 'wscore') { scene = 13; return; }
+        if (key === 'harm') { harmIntroDone = true; scene = 14; return; }
+        if (key === 'benefits') { harmIntroDone = true; startSequence(); return; }
+        if (key === 'reports') { scene = 17; return; }
+        if (key === 'conclusion') { scene = 18; return; }
+    }
 
     onMount(() => {
         async function loadCanada() {
@@ -369,75 +410,59 @@
             canvas.height = window.innerHeight;
             const ctx = canvas.getContext('2d');
             const num_drops = 900;
-            const droplets = Array.from({ length: num_drops }, () => ({
+            droplets = Array.from({ length: num_drops }, () => ({
                 x: Math.random() * canvas.width,
                 y: Math.random() * canvas.height,
                 vy: Math.random() * 2 + 5,
                 a: a,
+                targetA: a,
             }));
 
             function handleStepEnter(response) {
                 currentStep = response.index;
-                if (response.index === 2) {
-                    var mindist = 9000;
-                    for (const drop of droplets) {
-                        if (Math.hypot(drop.x - (canvas.width / 2), drop.y - (canvas.height / 2)) < mindist) {
-                            mindist = Math.hypot(drop.x - (canvas.width / 2), drop.y - (canvas.height / 2));
-                            chosenDrop = drop;
-                        }
-                    }
-                    chosenDrop.vy = 0;
-                    chosenDrop.x = canvas.width / 2;
-                    chosenDrop.y = canvas.height / 2;
-                }
+                if (scene !== 0) return;
 
-                if (response.index === 1 && response.direction === 'up') {
-                    if (chosenDrop) {
-                        chosenDrop.a = 4;
-                        chosenDrop.vy = Math.random() * 2 + 5;
-                        chosenDrop = null;
-                        gameStarted = false;
-                        gameComplete = false;
-                        gameVerdict = false;
+                if (response.index === 2 && !chosenDrop) {
+                    ensureChosenDrop();
+                }
+            }
+
+            const GAME_THRESHOLD = 0.6;
+
+            function handleStepProgress(response) {
+                if (scene !== 0) return;
+
+                const scrollY = typeof window !== 'undefined' ? window.scrollY : 0;
+                if (response.index < 2 || scrollY < window.innerHeight * 0.5) {
+                    resetAllDroplets();
+                    if (!gameVerdict && !gameComplete) {
                         currentRound = 0;
                         correctCount = 0;
                         userGuess = null;
                         showArrow = false;
-                        sequenceStarted = false;
-                        benefitStage = 0;
                     }
-                }
-            }
-
-            // Threshold at which the expanding droplet has swallowed enough of the
-            // screen to hand over to the game.
-            const GAME_THRESHOLD = 0.6;
-
-            function handleStepProgress(response) {
-                if (!chosenDrop) return;
-                if (response.index < 2) {
                     gameVisible = false;
                     gameStarted = false;
                     return;
                 }
+
+                if (!chosenDrop) {
+                    ensureChosenDrop();
+                }
+                if (!chosenDrop) return;
+
                 const globalProgress = (response.index - 2 + response.progress) / 2;
 
                 let maxSize = Math.max(canvas.width, canvas.height);
-                chosenDrop.a = 4 + (globalProgress * maxSize);
+                chosenDrop.targetA = 4 + (globalProgress * maxSize);
 
-                // Once the game has been played through, its own overlays (verdict,
-                // benefits) own the screen — scroll progress must not yank them away.
                 if (gameVerdict || gameComplete) return;
 
                 const past = globalProgress > GAME_THRESHOLD;
 
-                // Scrolling back out below the threshold has to *un*-latch this.
-                // Leaving it stuck true is what left the game floating over the rain.
                 if (past !== gameStarted) {
                     gameStarted = past;
                     if (!past) {
-                        // Abandon the run in progress so returning to it starts clean
-                        // rather than resuming mid-round with a stale guess showing.
                         currentRound = 0;
                         correctCount = 0;
                         userGuess = null;
@@ -465,6 +490,8 @@
                 }
 
                 if (chosenDrop) {
+                    chosenDrop.a += (chosenDrop.targetA - chosenDrop.a) * 0.15;
+
                     ctx.fillStyle = "blue";
                     ctx.strokeStyle = "black";
                     ctx.beginPath();
@@ -506,6 +533,8 @@
 {#if currentStep === 0 && scene === 0 && !gameComplete}
     <div class="intro-title" transition:fade={{ duration: 600 }}>
         <h1>The Monitoring Mirage</h1>
+        <h2>An exploration into the inequity of weather monitoring across Ontario</h2>
+        <p>Yash Jain</p>
         <div class="scroll-cue">
             <span>Scroll to begin</span>
             <span class="chevron">⌄</span>
@@ -515,46 +544,57 @@
 
 <div bind:this={introView} id="intro-view" class="intro-view">
     <div class="sticky-graphic">
-        <svg class="interactive-layer">
-            {#each eventDroplets as drop}
-                <path
-                    d="M {drop.x} {drop.y - drop.a} 
-                    L {drop.x + drop.a} {drop.y} 
-                    A {drop.a} {drop.a} 0 1 1 {drop.x - drop.a} {drop.y} 
-                    Z"
-                    fill={hoveredEventId === drop.id ? "red" : "gold"}
-                    stroke="black"
-                    class="event-droplet"
-                    role="button"
-                    tabindex="0"
-                    onmouseenter={() => hoveredEventId = drop.id}
-                    onmouseleave={() => hoveredEventId = null}
-                />
-                <text
-                    x="{drop.x}"
-                    y={drop.y + 4}
-                    text-anchor="middle"
-                    font-size="10"
-                    pointer-events="none"
-                    fill="white"
-                >
-                    {drop.year}
-                </text>
-            {/each}
-        </svg>
 
-        {#if hoveredEventData}
-            <div
-                class="tooltip"
-                style="left: {hoveredEventData.x}px; top: {hoveredEventData.y}px;"
-            >
-                <h3>{hoveredEventData.name} ({hoveredEventData.year})</h3>
-                <p>{hoveredEventData.damage}</p>
-                <p class="tooltip-hint">Bigger drop = costlier flood</p>
+        {#if gameVisible && !gameIntroDismissed && !gameVerdict && !gameComplete}
+            <div class="game-overlay" transition:fade={{ duration: 400 }}>
+                <div class="game-card game-intro-card">
+                    <h2>Guess the Flood</h2>
+                    <p class="game-intro-text">
+                        The following game will display the streamflow data of a nearby station
+                        along with the precipitation measured at a nearby station over the course
+                        of 8-10 days. Your goal is to determine if a flood occurred within that
+                        timeframe.
+                    </p>
+
+                    <div class="example-graphic">
+                        <span class="example-label">Example</span>
+                        <div class="graphs-container example-graphs">
+                            <div class="graph">
+                                <div class="graph-head">
+                                    <h4>Precipitation</h4>
+                                    <span class="axis-unit">mm / day</span>
+                                </div>
+                                <div class="plot example-plot">
+                                    <div class="mock-bars">
+                                        {#each precipHeights(EXAMPLE_PRECIP) as b}
+                                            <div class="bar" style="height: {b.h}%"></div>
+                                        {/each}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="graph">
+                                <div class="graph-head">
+                                    <h4>Streamflow</h4>
+                                    <span class="axis-unit">m³ / s</span>
+                                </div>
+                                <div class="plot example-plot">
+                                    <svg class="flow-svg" width="100%" height="100%" viewBox="0 0 100 50" preserveAspectRatio="none">
+                                        {#each flowSegments(EXAMPLE_FLOW).paths as d}
+                                            <path {d} fill="none" stroke="#60a5fa" stroke-width="2.5" vector-effect="non-scaling-stroke"/>
+                                        {/each}
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="example-caption">Rain arrives, then the river responds — often a day or more later.</p>
+                    </div>
+
+                    <button class="btn-reset" onclick={() => gameIntroDismissed = true}>Start</button>
+                </div>
             </div>
         {/if}
 
-        {#if gameVisible && !gameVerdict && !gameComplete && rounds[currentRound]}
+        {#if gameVisible && gameIntroDismissed && !gameVerdict && !gameComplete && rounds[currentRound]}
             <div class="game-overlay" transition:fade={{ duration: 400 }}>
                 <div class="game-card">
                     <h2>Guess the Flood</h2>
@@ -566,6 +606,9 @@
                                 <h4>Precipitation</h4>
                                 <span class="axis-unit">mm / day</span>
                             </div>
+                            {#if precipAvgPct != null}
+                                <p class="avg-legend"><span class="avg-swatch-line"></span>historical average ({fmtTick(round.precipAvg)} mm/day)</p>
+                            {/if}
                             <div class="chart-row">
                                 <div class="y-ticks">
                                     <span>{fmtTick(precipMax)}</span>
@@ -575,6 +618,9 @@
                                 <div class="plot">
                                     <div class="grid-line" style="top: 0"></div>
                                     <div class="grid-line" style="top: 50%"></div>
+                                    {#if precipAvgPct != null}
+                                        <div class="avg-line" style="bottom: {precipAvgPct}%" title="Historical average: {round.precipAvg} mm/day"></div>
+                                    {/if}
                                     <div class="mock-bars">
                                         {#each precipHeights(rounds[currentRound].precip) as b}
                                             {#if b.missing}
@@ -604,6 +650,9 @@
                                 </h4>
                                 <span class="axis-unit">m³ / s</span>
                             </div>
+                            {#if flowAvgY != null}
+                                <p class="avg-legend"><span class="avg-swatch-line"></span>historical average ({fmtTick(round.flowAvg)} m³/s)</p>
+                            {/if}
                             <div class="chart-row">
                                 <div class="y-ticks">
                                     <span>{fmtTick(flowMax)}</span>
@@ -614,6 +663,9 @@
                                     <div class="grid-line" style="top: 0"></div>
                                     <div class="grid-line" style="top: 50%"></div>
                                     <svg class="flow-svg" width="100%" height="100%" viewBox="0 0 100 50" preserveAspectRatio="none">
+                                        {#if flowAvgY != null}
+                                            <line x1="0" x2="100" y1={flowAvgY} y2={flowAvgY} stroke="#fbbf24" stroke-width="1.4" stroke-dasharray="3 2.5" vector-effect="non-scaling-stroke"/>
+                                        {/if}
                                         {#each flowSegments(rounds[currentRound].flow).paths as d}
                                             <path {d} fill="none" stroke="#60a5fa" stroke-width="2.5" vector-effect="non-scaling-stroke"/>
                                         {/each}
@@ -663,14 +715,14 @@
         {#if gameVerdict && !gameComplete}
             <div class="game-overlay" transition:fade={{ duration: 400 }}>
                 <div class="game-card">
-                    <h2>{correctCount} of {totalRounds}, nice job given the data</h2>
-                    <p class="unscored">This is not an isolated problem. There have been many other instances.</p>
-                    <button class="btn-reset" onclick={() => gameComplete = true}>See the bigger picture</button>
+                    <h2>{correctCount} of {totalRounds}</h2>
+                    <p class="unscored" transition:fade={{ delay: 500, duration: 700 }}>The importance of ground truth data for weather forecasting cannot be overstated.</p>
+                    <button class="btn-reset" onclick={openBiggerPicture}>See the station distribution</button>
                 </div>
             </div>
         {/if}
 
-        {#if gameComplete}
+        {#if gameComplete && scene === 14 && harmIntroDone}
             <div class="black-bg" transition:fade={{ duration: 800 }}></div>
             <div class="map-overlay" transition:fade={{ duration: 800 }}>
                 <div class="map-layout">
@@ -711,50 +763,50 @@
                     </div>
 
                     <div class="text-column">
-                        <h2 class="map-title">Where a lack of monitoring caused harm</h2>
                         <p>Across Canada, gaps in weather and streamflow monitoring have left communities without warning when it mattered most.</p>
-                        <p>Each marked location is a real event where a radar gap, a broken station, or a missing gauge delayed detection — or meant no warning came at all.</p>
+                        <p>Each marked location is a situation or expressed concern of this specific instance</p>
                         <p>Hover a star to see what happened. Click it to read the reporting.</p>
                     </div>
                 </div>
             </div>
-
             {#if showArrow && !sequenceStarted}
                 <button class="advance-arrow" onclick={startSequence} transition:fade aria-label="Continue">→</button>
             {/if}
+        {/if}
 
-            {#if sequenceStarted}
-                <div class="benefits-overlay" transition:fade={{ duration: 600 }}>
-                    <div class="benefits-content">
-                        <p class="benefits-intro">{introTyped.text}</p>
+        {#if gameComplete && scene === 15}
+            <div class="benefits-overlay" transition:fade={{ duration: 600 }}>
+                <div class="benefits-content">
+                    <p class="benefits-intro">{introTyped.text}</p>
 
-                        {#each benefits as benefit, i}
-                            {#if benefitStage > i}
-                                <div class="benefit-row">
-                                    <div class="benefit-text">
-                                        <span class="benefit-num">{i + 1}.</span>
-                                        <span>{benefit.typed.text}</span>
-                                    </div>
-                                    {#if benefit.typed.text === benefit.full}
-                                        <div class="benefit-media" transition:fade={{ duration: 400 }}>
-                                            <img src={benefit.media} alt={benefit.caption} />
-                                            <span class="benefit-caption">{benefit.caption}</span>
-                                        </div>
-                                    {/if}
+                    {#each benefits as benefit, i}
+                        {#if benefitStage > i}
+                            <div class="benefit-row">
+                                <div class="benefit-text">
+                                    <span class="benefit-num">{i + 1}.</span>
+                                    <span>{benefit.typed.text}</span>
                                 </div>
-                            {/if}
-                        {/each}
+                                {#if benefit.typed.text === benefit.full}
+                                    <div class="benefit-media" transition:fade={{ duration: 400 }}>
+                                        <a href={benefit.link} target="_blank" rel="noopener noreferrer" class="benefit-media-link">
+                                            <img src={benefit.media} alt={benefit.caption} />
+                                        </a>
+                                        <span class="benefit-caption">{benefit.caption}</span>
+                                    </div>
+                                {/if}
+                            </div>
+                        {/if}
+                    {/each}
 
-                        <div class="benefits-footer">
-                            {#if benefitStage < benefits.length}
-                                <button class="advance-arrow inline" onclick={advanceSequence} aria-label="Next">→</button>
-                            {:else if scene === 0}
-                                <button class="advance-arrow inline pulse" onclick={() => scene = 11} aria-label="Continue">→</button>
-                            {/if}
-                        </div>
+                    <div class="benefits-footer">
+                        {#if benefitStage < benefits.length}
+                            <button class="advance-arrow inline" onclick={advanceSequence} aria-label="Next">→</button>
+                        {:else}
+                            <button class="advance-arrow inline pulse" onclick={() => scene = 16} aria-label="Continue">→</button>
+                        {/if}
                     </div>
                 </div>
-            {/if}
+            </div>
         {/if}
     </div>
 
@@ -773,7 +825,7 @@
 
 {#if scene === 12}
     <div class="scene-fullscreen interstitial">
-        <p class="interstitial-line" transition:fade={{ duration: 1000 }}>However, if we dig deeper…</p>
+        <p class="interstitial-line" transition:fade={{ duration: 1000 }}>However, its not what it seems</p>
         <button class="advance-arrow" onclick={() => scene = 13} aria-label="Continue">→</button>
     </div>
 {/if}
@@ -784,16 +836,72 @@
     </div>
 {/if}
 
-{#if scene === 14}
+{#if scene === 14 && !harmIntroDone}
+    <div class="scene-fullscreen interstitial">
+        <p class="interstitial-line" transition:fade={{ duration: 1000 }}>Where a lack of monitoring caused harm</p>
+        <button class="advance-arrow" onclick={() => harmIntroDone = true} aria-label="Continue">→</button>
+    </div>
+{/if}
+
+{#if scene === 16}
+    <div class="scene-fullscreen interstitial">
+        <p class="interstitial-line" transition:fade={{ duration: 1000 }}>Dont just take my work for it, the disaster databases clearly reflect where the most monitored regions are</p>
+        <button class="advance-arrow" onclick={() => scene = 17} aria-label="Continue">→</button>
+    </div>
+{/if}
+
+{#if scene === 17}
     <div class="scene-fullscreen">
-        <DisasterReports />
+        <DisasterReports onContinue={() => scene = 18} />
+    </div>
+{/if}
+
+{#if scene === 18}
+    <div class="scene-fullscreen">
+        <Conclusion />
     </div>
 {/if}
 
 {#if showController}
     <div class="scene-controller" transition:fade={{ duration: 300 }}>
-        <button class="ctrl-btn" onclick={goBack} aria-label="Previous scene">←</button>
-        <button class="ctrl-btn" onclick={goForward} disabled={!canGoForward} aria-label="Next scene">→</button>
+        <div class="chapters-wrap">
+            {#if chaptersOpen}
+                <button class="chapters-backdrop" onclick={closeChapters} aria-label="Close chapters"></button>
+                <div class="chapters-panel" transition:fade={{ duration: 150 }}>
+                    <span class="chapters-title">Chapters</span>
+                    <ul>
+                        {#each chapters as ch}
+                            <li>
+                                <button
+                                    class="chapter-item"
+                                    class:active={ch.key === currentChapterKey}
+                                    onclick={() => jumpToChapter(ch.key)}
+                                    aria-current={ch.key === currentChapterKey ? 'true' : undefined}
+                                >
+                                    {ch.label}
+                                </button>
+                            </li>
+                        {/each}
+                    </ul>
+                </div>
+            {/if}
+            <button
+                class="ctrl-btn chapters-btn"
+                onclick={toggleChapters}
+                aria-label="Chapters"
+                aria-expanded={chaptersOpen}
+                title="Chapters"
+            >
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                    <circle cx="4" cy="6" r="1.8" fill="currentColor" />
+                    <rect x="9" y="4.6" width="12" height="2.8" rx="1.4" fill="currentColor" />
+                    <circle cx="4" cy="12" r="1.8" fill="currentColor" />
+                    <rect x="9" y="10.6" width="12" height="2.8" rx="1.4" fill="currentColor" />
+                    <circle cx="4" cy="18" r="1.8" fill="currentColor" />
+                    <rect x="9" y="16.6" width="12" height="2.8" rx="1.4" fill="currentColor" />
+                </svg>
+            </button>
+        </div>
     </div>
 {/if}
 
@@ -924,6 +1032,103 @@
         transform: none;
     }
 
+    .chapters-wrap {
+        position: relative;
+    }
+
+    .chapters-btn {
+        color: #f8fafc;
+    }
+
+    .chapters-backdrop {
+        position: fixed;
+        inset: 0;
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin: 0;
+        z-index: 119;
+        cursor: default;
+    }
+
+    .chapters-panel {
+        position: absolute;
+        bottom: calc(100% + 0.75rem);
+        left: 50%;
+        transform: translateX(-50%);
+        width: 15rem;
+        background: rgba(10, 10, 18, 0.92);
+        border: 1px solid rgba(138, 180, 255, 0.3);
+        border-radius: 10px;
+        padding: 0.75rem 0.9rem;
+        backdrop-filter: blur(6px);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+        z-index: 121;
+    }
+
+    .chapters-title {
+        display: block;
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #8ab4ff;
+        margin-bottom: 0.4rem;
+    }
+
+    .chapters-panel ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+    }
+
+    .chapters-panel li {
+        margin: 0;
+        padding: 0;
+    }
+
+    .chapter-item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        background: none;
+        border: none;
+        border-radius: 5px;
+        font-size: 0.85rem;
+        font-weight: 400;
+        color: #94a3b8;
+        line-height: 1.4;
+        padding: 0.3rem 0.5rem 0.3rem 0.7rem;
+        cursor: pointer;
+        position: relative;
+        transition: background 0.15s, color 0.15s;
+    }
+
+    .chapter-item:hover {
+        color: #e2e8f0;
+        background: rgba(138, 180, 255, 0.1);
+        transform: none;
+    }
+
+    .chapter-item.active {
+        color: #f8fafc;
+        font-weight: 700;
+    }
+
+    .chapter-item.active::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #8ab4ff;
+    }
+
     .interactive-layer {
         position: absolute;
         top: 0;
@@ -935,20 +1140,7 @@
     }
 
     .event-droplet {
-        pointer-events: auto;
-        cursor: pointer;
-    }
-
-    .tooltip {
-        position: absolute;
         pointer-events: none;
-        background: white;
-        color: black;
-        padding: 10px;
-        border: 1px solid black;
-        border-radius: 4px;
-        transform: translate(-50%, -100%);
-        z-index: 20;
     }
 
     .step {
@@ -993,6 +1185,55 @@
         flex-direction: column;
         gap: 1.5rem;
         margin: 1.5rem 0;
+    }
+
+    .game-intro-card {
+        max-width: 460px;
+    }
+
+    .game-intro-text {
+        text-align: left;
+        line-height: 1.55;
+        color: #cbd5e1;
+        font-size: 0.92rem;
+        margin: 0.75rem 0 1.25rem;
+    }
+
+    .example-graphic {
+        position: relative;
+        background: rgba(255,255,255,0.03);
+        border: 1px dashed rgba(138,180,255,0.3);
+        border-radius: 10px;
+        padding: 1.1rem 1rem 0.8rem;
+    }
+
+    .example-label {
+        position: absolute;
+        top: -0.6rem;
+        left: 0.9rem;
+        background: #0a0a12;
+        padding: 0 0.5rem;
+        font-size: 0.66rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #8ab4ff;
+    }
+
+    .example-graphs {
+        margin: 0;
+        gap: 1rem;
+    }
+
+    .example-plot {
+        height: 60px;
+    }
+
+    .example-caption {
+        margin: 0.7rem 0 0;
+        font-size: 0.74rem;
+        color: #94a3b8;
+        text-align: left;
+        line-height: 1.4;
     }
 
     .graph-head {
@@ -1143,8 +1384,32 @@
         );
     }
 
+    /* Historical-average reference line, drawn across the precipitation bars. */
+    .avg-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 0;
+        border-top: 1.4px dashed #fbbf24;
+        z-index: 2;
+        pointer-events: none;
+    }
+
+    .avg-legend {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        margin: -0.15rem 0 0.35rem;
+        font-size: 0.68rem;
+        color: #fbbf24;
+    }
+    .avg-swatch-line {
+        width: 14px; height: 0; flex: none;
+        border-top: 1.4px dashed #fbbf24;
+    }
+
     .unscored {
-        font-size: 0.82rem !important;
+        font-size: 1.05rem !important;
         color: #fbbf24 !important;
         line-height: 1.5;
     }
@@ -1162,13 +1427,6 @@
         margin-top: 0.3rem;
         font-size: 0.68rem;
         color: #94a3b8;
-    }
-
-    .tooltip-hint {
-        margin: 0.35rem 0 0;
-        font-size: 0.72rem;
-        color: #64748b;
-        font-style: italic;
     }
 
     .button-group {
@@ -1415,13 +1673,31 @@
         justify-content: center;
     }
 
-    .benefit-media img {
-        width: 100%;
-        flex: 1 1 auto;
-        min-height: 0;              /* shrink instead of overflowing the page */
-        border-radius: 8px;
-        background: #1a1a2e;
-        object-fit: cover;
+    .benefit-media-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #10101a; /* Dark background behind letterboxed edges if aspect ratios differ */
+    }
+
+    .benefit-media-link img {
+        max-width: 100%;
+        max-height: 100%;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        display: block;
+        transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+
+    .benefit-media-link:hover img {
+        transform: scale(1.02);
+        opacity: 0.9;
     }
 
     .benefit-caption {
@@ -1447,7 +1723,7 @@
     height: 100vh;
     z-index: 100;
     background: #0a0a12;
-}
+    }
 
     .interstitial {
         display: flex;

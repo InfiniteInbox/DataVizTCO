@@ -255,13 +255,19 @@
 
     <div class="narrative">
         {#if showLine1}
-            <p class="line1" transition:fade={{ duration: 900 }}>It's not what it seems.</p>
+            <p class="line2" transition:fade={{ duration: 900 }}>
+                <span class="thr good">0.5</span> counts as adequately watched,
+                <span class="thr best">0.7</span> and above is well monitored,
+                but the Ontario average is <span class="thr bad">0.386</span>.
+                Hover over the heatmap to get a closer look at how well a
+                certain region is monitored.
+            </p>
         {/if}
         {#if showLine2}
-            <p class="line2" transition:fade={{ duration: 900 }}>
-                A place should sit above <span class="thr good">0.5</span> to count as adequately watched —
-                <span class="thr best">0.7</span> and up is genuinely well monitored.
-                Ontario's average is <span class="thr bad">0.386</span>.
+            <p class="line3" transition:fade={{ duration: 900 }}>
+                This heatmap was created by assembling various papers'
+                methodologies on assessing climate readiness of areas into
+                one formula.
             </p>
         {/if}
         {#if showLine2}
@@ -340,26 +346,27 @@
                         <p>For one square, ask of each network: <em>how much usable data actually informs this place each day?</em> Weight every sensor by how reliable it is and how often it reports — a gauge that reports hourly is worth 24× one that reports daily.</p>
                         <p>Crucially, a sensor doesn't only serve the square it stands in. A rain gauge is representative of the neighbourhood around it, so its contribution <strong>fades with distance</strong> rather than stopping at the property line:</p>
                         <div class="eq">{@html EQ.kernel}</div>
-                        <p><b>L</b> is the <em>decorrelation length</em> — how far a network's readings stay representative. Rain decorrelates fast (~20 km; a downpour is a local thing), temperature far more slowly (~40 km). Each sensor's reliability is multiplied by <b>K</b> before being added up:</p>
-                        <p class="aside">Rivers are the exception. A streamflow gauge tells you about its <em>watershed</em> — the places that drain through it — not about a circle of land, so it's spread along the basin instead. A gauge just over a drainage divide tells you almost nothing.</p>
+                        <p><b>L</b> is the <em>decorrelation length</em> — how far a network's readings stay representative. Rain decorrelates fast (roughly 20 km; a downpour is a local thing), temperature far more slowly (on the order of 40 km). Each sensor's reliability is multiplied by <b>K</b> before being added up:</p>
                         <div class="eq">{@html EQ.adequacy}</div>
                         <ul class="gloss">
                             <li><b>ρ</b> — reliability: the share of readings that actually arrive clean.</li>
                             <li><b>r</b> — reports per day (24 for hourly, 1 for daily).</li>
-                            <li><b>m</b> — redundancy discount: two gauges side by side see the same storm, so the second one counts for less.</li>
+                            <li><b>m</b> — redundancy discount: two gauges side by side see the same storm, so the second one counts for less.<sup class="cite"><a href="#r3">3</a>,<a href="#r4">4</a></sup></li>
                             <li><b>κ</b> — how many observations count as "enough".</li>
                             <li><b>d</b> — distance from the sensor to the square being scored.</li>
                         </ul>
-                        <p>The <b>exponential is the important part</b>: it gives <strong>diminishing returns</strong>. Going from zero gauges to one transforms a square; the tenth gauge barely moves it. Nothing here → 0. Thoroughly watched → approaches 1, never past it.</p>
+                        <p class="aside">Two networks set their own reach instead of a fixed <b>L</b>. A streamflow gauge tells you about its <em>watershed</em>, so it's spread along the basin. And for precipitation we don't guess a length at all — Environment and Climate Change Canada's analysis publishes a per-cell confidence index that already encodes how far each observation's influence reaches, and we use that directly.<sup class="cite"><a href="#r5">5</a>,<a href="#r7">7</a></sup></p>
+                        <p>The <b>exponential is the important part</b>: it gives <strong>diminishing returns</strong>. Going from zero gauges to one transforms a square; the tenth gauge barely moves it.</p>
                     </div>
                 </div>
 
                 <div class="step">
                     <span class="n">2</span>
                     <div>
-                        <h4>Let radar play by the same rules</h4>
-                        <p>Radar isn't a point sensor, so it gets its own bounded grade: how reliable the nearest tower is at this distance, times whether the square is inside its reach. Capping it at 0.95 stops radar — by far the densest source — from swamping everything else, which is what broke v1 of this score.</p>
+                        <h4>Radar is different</h4>
+                        <p>Radar isn't a point sensor, so it gets its own bounded grade: how reliable the nearest tower is at this distance, times whether the square is inside its reach. The 0.95 ceiling reflects that even directly overhead, radar rainfall is an <em>estimate</em>, not ground truth.</p>
                         <div class="eq">{@html EQ.radar}</div>
+                        <p>What keeps radar — by far the most information-rich source<sup class="cite"><a href="#r3">3</a></sup> — from swamping everything else isn't that ceiling, but the structure of Step 3: every network is graded on the same [0,1] scale and the weights sum to 1. v1 lacked that. There, radar's reporting-frequency term was unbounded, so its six-minute cadence made it worth roughly ten times any ground network before weighting even began — which is what broke it.</p>
                     </div>
                 </div>
 
@@ -367,9 +374,9 @@
                     <span class="n">3</span>
                     <div>
                         <h4>Decide how much each network counts, then blend</h4>
-                        <p>Instead of guessing percentages, we compare networks <strong>two at a time</strong> ("how much more useful is radar than a river gauge?") and let AHP turn those pairwise judgements into weights. Multiply each grade by its weight, add them up.</p>
+                        <p>Instead of guessing percentages, we compare networks <strong>two at a time</strong> ("how much more useful is radar than a river gauge?") and let the Analytic Hierarchy Process turn those pairwise judgements into weights.<sup class="cite"><a href="#r1">1</a></sup> Applying it to station-network design, with different weightings for different priorities, follows Feloni et al.<sup class="cite"><a href="#r2">2</a></sup> Multiply each grade by its weight, add them up.</p>
                         <div class="eq">{@html EQ.blend}</div>
-                        <p>Because the weights sum to 1 and every grade sits in [0,1], the result is guaranteed to land in <strong>[0,1]</strong> — so any two squares in Ontario are directly comparable. AHP also audits itself: a <strong>consistency ratio</strong> below 0.10 means the pairwise calls don't contradict each other. Ours is <strong>0.010</strong>.</p>
+                        <p>Because the weights sum to 1 and every grade sits in [0,1], the result is guaranteed to land in <strong>[0,1]</strong> — so any two squares in Ontario are directly comparable. AHP also audits itself: a <strong>consistency ratio</strong> below 0.10 means the pairwise calls don't contradict each other.<sup class="cite"><a href="#r1">1</a></sup> Ours is <strong>0.010</strong>.</p>
                         <p class="tryit">Those <b>w</b>'s are exactly what the <button class="link" onclick={() => panel = 'weights'}>Adjust weights</button> sliders change.</p>
                     </div>
                 </div>
@@ -381,6 +388,26 @@
                         <div class="eq">{@html EQ.inequity}</div>
                         <p>Across <strong>1,078,363</strong> square kilometres the mean score is <strong>0.386</strong> — a quarter of Ontario sits below <strong>0.254</strong>. Best cell: 0.936. Worst: a flat <strong>0</strong>.</p>
                     </div>
+                </div>
+
+                <div class="refs">
+                    <h4>References</h4>
+                    <ol>
+                        <li id="r1">Saaty, T. L. (1977). A scaling method for priorities in hierarchical structures. <i>Journal of Mathematical Psychology</i>, 15(3), 234–281.</li>
+                        <li id="r2">Feloni, E. G., Karpouzos, D. K., &amp; Baltas, E. A. (2018). Optimal hydrometeorological station network design using GIS techniques and multicriteria decision analysis. <i>Journal of Hazardous, Toxic, and Radioactive Waste</i>, 22(3), 04018007.</li>
+                        <li id="r3">Yeh, H.-C., Chen, Y.-C., Chang, C.-H., Ho, C.-H., &amp; Wei, C. (2017). Rainfall network optimization using radar and entropy. <i>Entropy</i>, 19(10), 553.</li>
+                        <li id="r4">Li, C., Singh, V. P., &amp; Mishra, A. K. (2012). Entropy theory-based criterion for hydrometric network evaluation and design: Maximum information minimum redundancy. <i>Water Resources Research</i>, 48(5), W05521.</li>
+                        <li id="r5">Mahfouf, J.-F., Brasnett, B., &amp; Gagnon, S. (2007). A Canadian Precipitation Analysis (CaPA) project: Description and preliminary results. <i>Atmosphere-Ocean</i>, 45(1), 1–17.</li>
+                        <li id="r6">Lespinas, F., Fortin, V., Roy, G., Rasmussen, P., &amp; Stadnyk, T. (2015). Performance evaluation of the Canadian Precipitation Analysis (CaPA). <i>Journal of Hydrometeorology</i>, 16(5), 2045–2064.</li>
+                        <li id="r7">Fortin, V., Roy, G., Stadnyk, T., Koenig, K., Gasset, N., &amp; Mahidjiba, A. (2018). Ten years of science based on the Canadian Precipitation Analysis: A CaPA system overview and literature review. <i>Atmosphere-Ocean</i>, 56(3), 178–196.</li>
+                    </ol>
+                    <h4>Data sources</h4>
+                    <ul>
+                        <li>Ontario Watershed Boundaries — Ontario Ministry of Natural Resources (Land Information Ontario / Ontario GeoHub).</li>
+                        <li>Streamflow — HYDAT, Water Survey of Canada, Environment and Climate Change Canada.</li>
+                        <li>Surface climate stations — Environment and Climate Change Canada.</li>
+                        <li>Precipitation confidence (RDPA / CaPA CIFA) — Meteorological Service of Canada, ECCC.</li>
+                    </ul>
                 </div>
             </div>
         {/if}
@@ -415,7 +442,6 @@
         z-index: 5; display: flex; flex-direction: column; gap: 1rem;
     }
     .narrative p { margin: 0; line-height: 1.4; text-shadow: 0 2px 12px rgba(0,0,0,0.85); }
-    .narrative .line1 { font-size: 1.8rem; font-weight: 700; }
     .narrative .line2 { font-size: 1.15rem; font-weight: 500; color: #cbd5e1; }
     .narrative .line3 { font-size: 1.05rem; font-weight: 500; color: #94a3b8; }
     .thr { font-weight: 800; }
