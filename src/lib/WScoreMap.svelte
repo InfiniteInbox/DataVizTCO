@@ -149,6 +149,9 @@
     }
 
     onMount(() => {
+        // Clean up any existing registration to prevent HMR/reload breaks
+        try { maplibregl.removeProtocol('pmtiles'); } catch (e) {}
+
         const protocol = new Protocol();
         maplibregl.addProtocol('pmtiles', protocol.tile);
 
@@ -165,10 +168,6 @@
             const bounds = await fetch(`${base}/data/ontario_wscore_bounds.json`).then(r => r.json());
             const ontarioBounds = [[bounds.west, bounds.south], [bounds.east, bounds.north]];
 
-            // maxBounds clamps the viewport, not the content — so a pan box set to
-            // Ontario exactly will CROP the province on any window whose aspect ratio
-            // doesn't match it. Pad the box (neighbouring provinces may peek in at the
-            // edges, which is fine) so the whole extent always fits on screen.
             const PAD_LNG = 8, PAD_LAT = 4;
             const panBounds = [
                 [bounds.west - PAD_LNG, bounds.south - PAD_LAT],
@@ -176,25 +175,20 @@
             ];
             map.setMaxBounds(panBounds);
 
-            // Frame the full extent, then make that zoom the floor: the user can zoom
-            // in freely but never back out past the whole-province view.
             map.fitBounds(ontarioBounds, { padding: 40, duration: 0 });
             map.setMinZoom(map.getZoom());
-            maplibregl.addProtocol("pmtiles", protocol.tile);
 
-            // Is the coarse overview tileset present? (Optional but strongly
-            // recommended — see WSCORE_TILES_AND_SETUP.md.)
+            // 1. Standard https:// for JS fetch
             const hasCoarse = await fetch(`https://pub-28597005e3d942a78c03d372ff7cdadc.r2.dev/ontario_wscore_coarse.pmtiles`, { method: 'HEAD' })
                 .then(r => r.ok).catch(() => false);
 
             if (hasCoarse) {
                 map.addSource('wscore-coarse', {
                     type: 'vector',
+                    // 2. Ensure colon after https:
                     url: `pmtiles://https://pub-28597005e3d942a78c03d372ff7cdadc.r2.dev/ontario_wscore_coarse.pmtiles`,
                     promoteId: 'cell_id'
                 });
-                // minzoom 0, not 4: the zoom that fits all of Ontario can fall below
-                // 4 on a small window, and the layer would silently not render.
                 addFillLayer('wscore-coarse-fill', 'wscore-coarse', 'wscore', 0, COARSE_MAX);
             }
 
@@ -203,8 +197,7 @@
                 url: `pmtiles://https://pub-28597005e3d942a78c03d372ff7cdadc.r2.dev/ontario_wscore.pmtiles`,
                 promoteId: 'cell_id'
             });
-            // Fine grid only takes over above the coarse handoff (or everywhere
-            // if the coarse file isn't there).
+
             addFillLayer('wscore-fine-fill', 'wscore', 'wscore', hasCoarse ? COARSE_MAX : 0, 12);
 
             map.addLayer({
@@ -219,7 +212,6 @@
                 }
             });
 
-            // Fade the surface in.
             const reveal = ['case', ['boolean', ['feature-state', 'hover'], false], 1.0, 0.85];
             setTimeout(() => {
                 for (const id of ['wscore-fine-fill', 'wscore-coarse-fill']) {
@@ -238,7 +230,7 @@
 
         return () => {
             map?.remove();
-            maplibregl.removeProtocol('pmtiles');
+            try { maplibregl.removeProtocol('pmtiles'); } catch (e) {}
         };
     });
 
