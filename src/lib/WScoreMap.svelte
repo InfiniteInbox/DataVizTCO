@@ -1,5 +1,6 @@
 <script>
     import { onMount } from 'svelte';
+    import { base } from '$app/paths';
     import { fade } from 'svelte/transition';
     import maplibregl from 'maplibre-gl';
     import 'maplibre-gl/dist/maplibre-gl.css';
@@ -161,7 +162,7 @@
         });
 
         map.on('load', async () => {
-            const bounds = await fetch('/data/ontario_wscore_bounds.json').then(r => r.json());
+            const bounds = await fetch(`${base}/data/ontario_wscore_bounds.json`).then(r => r.json());
             const ontarioBounds = [[bounds.west, bounds.south], [bounds.east, bounds.north]];
 
             // maxBounds clamps the viewport, not the content — so a pan box set to
@@ -182,13 +183,13 @@
 
             // Is the coarse overview tileset present? (Optional but strongly
             // recommended — see WSCORE_TILES_AND_SETUP.md.)
-            const hasCoarse = await fetch('/data/ontario_wscore_coarse.pmtiles', { method: 'HEAD' })
+            const hasCoarse = await fetch(`${base}/data/ontario_wscore_coarse.pmtiles`, { method: 'HEAD' })
                 .then(r => r.ok).catch(() => false);
 
             if (hasCoarse) {
                 map.addSource('wscore-coarse', {
                     type: 'vector',
-                    url: 'pmtiles:///data/ontario_wscore_coarse.pmtiles',
+                    url: `pmtiles://${base}/data/ontario_wscore_coarse.pmtiles`,
                     promoteId: 'cell_id'
                 });
                 // minzoom 0, not 4: the zoom that fits all of Ontario can fall below
@@ -198,7 +199,7 @@
 
             map.addSource('wscore', {
                 type: 'vector',
-                url: 'pmtiles:///data/ontario_wscore.pmtiles',
+                url: `pmtiles://${base}/data/ontario_wscore.pmtiles`,
                 promoteId: 'cell_id'
             });
             // Fine grid only takes over above the coarse handoff (or everywhere

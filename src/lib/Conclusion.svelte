@@ -1,4 +1,5 @@
 <script>
+    import { base } from '$app/paths';
     import { fade } from 'svelte/transition';
 
     const ORGS = [
@@ -71,7 +72,7 @@
             {#each ORGS as org}
                 <a class="org-card" href={org.url} target="_blank" rel="noopener noreferrer">
                     <div class="org-logo-tile">
-                        <img src={org.logo} alt="{org.name} logo" loading="lazy" />
+                        <img src={`${base}${org.logo}`} alt="{org.name} logo" loading="lazy" />
                     </div>
                     <div class="org-body">
                         <h3>{org.name}</h3>
