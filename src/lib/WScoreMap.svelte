@@ -380,7 +380,6 @@
                     <div>
                         <h4>Flip it to find the blind spots</h4>
                         <div class="eq">{@html EQ.inequity}</div>
-                        <p>Across <strong>1,078,363</strong> square kilometres the mean score is <strong>0.386</strong> — a quarter of Ontario sits below <strong>0.254</strong>. Best cell: 0.936. Worst: a flat <strong>0</strong>.</p>
                     </div>
                 </div>
 
