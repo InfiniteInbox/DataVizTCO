@@ -180,6 +180,7 @@
             // in freely but never back out past the whole-province view.
             map.fitBounds(ontarioBounds, { padding: 40, duration: 0 });
             map.setMinZoom(map.getZoom());
+            maplibregl.addProtocol("pmtiles", protocol.tile);
 
             // Is the coarse overview tileset present? (Optional but strongly
             // recommended — see WSCORE_TILES_AND_SETUP.md.)
